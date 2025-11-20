@@ -1,16 +1,36 @@
-# React + Vite
+# Time Capsule Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This frontend is a React app that talks directly to the Express API inside `../server`.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Lists every capsule returned by `GET /api/capsules`.
+- Shows capsule details, reveal status, and message payload when available.
+- Provides an unlock form that posts to `POST /api/capsules/:id/unlock`.
+- Ships a minimal creation form that calls `POST /api/capsules`.
+- Tailwind CSS v4 plus DaisyUI handle all styling so you can tweak the design with utility classes.
 
-## React Compiler
+## Getting Started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Copy the example environment file and point it at your backend:
 
-## Expanding the ESLint configuration
+```bash
+cp .env.example .env
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+By default the client talks to `http://localhost:4000/api`, which matches the dev server.
+
+1. Install dependencies and start Vite:
+
+```bash
+npm install
+npm run dev
+```
+
+## Routes
+
+- `/` — capsule list with refresh control.
+- `/capsules/:id` — details page with unlock workflow.
+- `/create` — minimal creation form (title, message, reveal date, optional author/passphrase).
+
+Everything else uses the default 404 page served by React Router.
