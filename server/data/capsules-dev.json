@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": "fe7dba53-b7fd-462f-a293-f95def11b556",
+    "title": "wowowow",
+    "message": "let's do this hahaah",
+    "author": "wow",
+    "createdAt": "2025-11-20T16:52:30.079Z",
+    "revealAt": "2025-11-22T16:52:00.000Z",
+    "isLocked": true,
+    "passphraseHash": "$2b$10$cNW8ayTTKKQIJxWGbzf72uigZ8hUq40pvCT97tuqEtgWPap3xCCwS"
+  }
+]
