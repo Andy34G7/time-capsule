@@ -5,7 +5,7 @@
 - Provide a minimal-but-extensible time capsule web app where users can submit messages ("capsules") to be revealed now or in the future.
 - Persist capsules indefinitely in Turso (serverless SQLite) so the solution works on serverless platforms without local disk while supporting relational queries.
 - Require a per-capsule passphrase whenever the creator supplies one; otherwise capsules are public once their reveal date passes.
-- Keep the stack lightweight (Node.js + Express) while leaving room to bolt on richer auth or database layers later.
+- Keep the stack lightweight (Node.js + Express) while leaving room to bolt on richer auth or database layers later, including OAuth-based login so capsules remain visible only to their owners when desired.
 
 ## 2. High-Level Architecture
 
@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS capsules (
   title TEXT NOT NULL,
   message TEXT NOT NULL,
   author TEXT,
+  owner_id TEXT,
   created_at TEXT NOT NULL,
   reveal_at TEXT NOT NULL,
   is_locked INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);
 
 - Store all datetimes as ISO-8601 strings so comparisons sort lexicographically.
 - `is_locked` stays `1` even after reveal to enforce passphrase unlocking.
+- `owner_id` remains nullable until OAuth launches, then stores the external user identifier to scope listings.
 - Future columns (attachments, template references) can be appended via migrations.
 
 ### 4.2 Query & Access Patterns
@@ -184,7 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);
 ## 9. Future Enhancements
 
 - Email reminders when a capsule becomes available (Resend, SES, or any transactional email provider).
-- User accounts for managing personal capsules instead of passphrases.
+- User accounts powered by OAuth so capsules can be tied to `owner_id` and only visible to the authenticated creator unless explicitly shared.
 - Full-text search using Turso full-text virtual tables or an external search service (Typesense, OpenSearch).
 - Export/import capsules as encrypted bundles for offline archiving.
 
@@ -223,6 +225,13 @@ This plan provides the necessary runway to implement and deploy a secure, server
 - Treat mini games as capsule-linked experiences: each game stores score snapshots inside the capsule record under `gameStates`.
 - Build lightweight Canvas or JS games (e.g., quiz, memory) hosted under `/public/games` with the ability to save scores via `/api/capsules/:id/game-state`.
 - On reveal, display historical scores/leaderboards to revisit.
+
+#### Phase 6 – OAuth Login & Private Capsules
+
+- Integrate OAuth (Auth0, Cognito, Supabase, or custom OpenID Connect) to issue JWTs containing a stable `sub` claim stored as `owner_id` in Turso.
+- Expand capsule routes to require authentication for creation/listing when `owner_id` is enabled, ensuring each account only sees its own future-dated capsules while still allowing public capsules with `owner_id = NULL`.
+- Provide migration to backfill existing capsules with optional owners or keep them public; update the client to store tokens securely and include them in API requests.
+- Add admin tooling to reassign or anonymize capsules if a user deletes their account.
 
 ### 10.2 Experience Enhancers
 
