@@ -39,6 +39,7 @@ async function ensureSchema() {
           title TEXT NOT NULL,
           message TEXT NOT NULL,
           author TEXT,
+          owner_id TEXT,
           created_at TEXT NOT NULL,
           reveal_at TEXT NOT NULL,
           is_locked INTEGER NOT NULL DEFAULT 0,
@@ -46,10 +47,29 @@ async function ensureSchema() {
         );`,
         'CREATE INDEX IF NOT EXISTS idx_capsules_reveal ON capsules (reveal_at);',
         'CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);',
+        'CREATE INDEX IF NOT EXISTS idx_capsules_owner ON capsules (owner_id);',
       ];
 
       for (const sql of statements) {
         await db.execute(sql);
+      }
+
+      const migrations = ['ALTER TABLE capsules ADD COLUMN owner_id TEXT'];
+
+      for (const sql of migrations) {
+        try {
+          await db.execute(sql);
+        } catch (error) {
+          const message = String(error.message || error);
+          if (
+            message.includes('duplicate') ||
+            message.includes('exists') ||
+            message.includes('already')
+          ) {
+            continue;
+          }
+          throw error;
+        }
       }
     })();
   }

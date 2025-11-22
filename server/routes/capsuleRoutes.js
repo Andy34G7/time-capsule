@@ -1,8 +1,11 @@
 const express = require('express');
 const { z } = require('zod');
 const capsuleService = require('../services/capsuleService');
+const requireAuth = require('../middleware/auth');
 
 const router = express.Router();
+
+router.use(requireAuth());
 
 //dev note: schema is to set certain rules for the objects we create. 
 //usually good practice to have a schema validation to avoid bad data being processed
@@ -39,7 +42,8 @@ function handleValidation(schema, payload) {
 // on a get request, 
 router.get('/', async (req, res, next) => {
 	try {
-		const capsules = await capsuleService.listCapsuleSummaries();
+		const ownerId = req.user?.sub;
+		const capsules = await capsuleService.listCapsuleSummaries(ownerId);
 		res.json({ data: capsules });
 	} catch (error) {
 		next(error);
@@ -49,7 +53,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
 	try {
 		const payload = handleValidation(createCapsuleSchema, req.body);
-		const capsule = await capsuleService.createCapsule(payload);
+		const capsule = await capsuleService.createCapsule(payload, req.user?.sub);
 		res.status(201).json({ data: capsule });
 	} catch (error) {
 		next(error);
@@ -58,7 +62,7 @@ router.post('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
 	try {
-		const result = await capsuleService.getCapsuleStatus(req.params.id);
+		const result = await capsuleService.getCapsuleStatus(req.params.id, req.user?.sub);
 		if (result.status === 'not_found') {
 			return res.status(404).json({ error: 'CapsuleNotFound' });
 		}
@@ -77,6 +81,7 @@ router.post('/:id/unlock', async (req, res, next) => {
 		const result = await capsuleService.unlockCapsule(
 			req.params.id,
 			payload.passphrase,
+			req.user?.sub,
 		);
 
 		if (result.status === 'not_found') {

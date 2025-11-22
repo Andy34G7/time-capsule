@@ -4,9 +4,17 @@ const storage = require('./storageService');
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 10);
 
+function assertOwner(ownerId) {
+  if (!ownerId) {
+    const error = new Error('OwnerRequired');
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
 // strips password hash from the capsule
 function stripSensitiveFields(capsule) {
-  const { passphraseHash, ...rest } = capsule;
+  const { passphraseHash, ownerId, ...rest } = capsule;
   return rest;
 }
 
@@ -20,7 +28,8 @@ function messageAvailableFlag(capsule, messageAvailable) {
   return sanitized;
 }
 
-async function createCapsule(payload) {
+async function createCapsule(payload, ownerId) {
+  assertOwner(ownerId);
   const now = new Date().toISOString();
   const revealAt = new Date(payload.revealAt).toISOString();
   const isLocked = Boolean(payload.passphrase);
@@ -31,6 +40,7 @@ async function createCapsule(payload) {
     title: payload.title,
     message: payload.message,
     author: payload.author || null,
+    ownerId,
     createdAt: now,
     revealAt,
     isLocked,
@@ -41,8 +51,9 @@ async function createCapsule(payload) {
   return messageAvailableFlag(capsule, !isLocked && new Date(revealAt) <= new Date(now));
 }
 // shw capsule reveal dates without sending message body to the client
-async function listCapsuleSummaries() { 
-  const capsules = await storage.getCapsules();
+async function listCapsuleSummaries(ownerId) {
+  assertOwner(ownerId);
+  const capsules = await storage.getCapsulesByOwner(ownerId);
   const now = new Date();
   return capsules.map((capsule) => {
     const revealReached = new Date(capsule.revealAt) <= now;
@@ -54,8 +65,9 @@ async function listCapsuleSummaries() {
   });
 }
 // a function to check if capsule can be shown, uses messageAvailableFlag to hide message if not
-async function getCapsuleStatus(id) {
-  const capsule = await storage.getCapsuleById(id);
+async function getCapsuleStatus(id, ownerId) {
+  assertOwner(ownerId);
+  const capsule = await storage.getCapsuleById(id, ownerId);
   if (!capsule) {
     return { status: 'not_found' };
   }
@@ -70,8 +82,9 @@ async function getCapsuleStatus(id) {
   return { status: 'available', capsule: messageAvailableFlag(capsule, true) };
 }
 // function to unlock the capsule with the passphrase. checks if capsule is locked and verifies passphrase
-async function unlockCapsule(id, passphrase) {
-  const capsule = await storage.getCapsuleById(id);
+async function unlockCapsule(id, passphrase, ownerId) {
+  assertOwner(ownerId);
+  const capsule = await storage.getCapsuleById(id, ownerId);
   if (!capsule) {
     return { status: 'not_found' };
   }
