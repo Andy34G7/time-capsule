@@ -10,7 +10,10 @@ git clone https://github.com/Andy34G7/time-capsule.git
 cd time-capsule
 ```
 
-2. Set the environment variables in a .env file for both client and server as needed (see `.env.example` files).
+2. Set the environment variables in a .env file for both client and server as needed (see `.env.example` files). When using Google OAuth:
+   - Server requires Turso credentials plus `OAUTH_JWKS_URL=https://www.googleapis.com/oauth2/v3/certs`, `OAUTH_ISSUER=https://accounts.google.com`, `OAUTH_AUDIENCE=<Google client id>`, and `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` for exchanging auth codes.
+   - Client requires `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_REDIRECT_URI` for the PKCE flow.
+   - During local development you can set `DEV_FAKE_USER_ID` on the server to bypass OAuth while still exercising owner-scoped capsules.
 
 3. Start the backend server:
 
