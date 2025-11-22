@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext.jsx';
 import { listCapsules, formatDate } from '../api/capsules.js';
 
 function CapsuleListPage() {
+	const { token } = useAuth();
 	const {
 		data: capsules,
 		isLoading,
@@ -10,7 +12,11 @@ function CapsuleListPage() {
 		error,
 		refetch,
 		isFetching,
-	} = useQuery({ queryKey: ['capsules'], queryFn: listCapsules });
+	} = useQuery({
+		queryKey: ['capsules', token],
+		queryFn: () => listCapsules(token),
+		enabled: Boolean(token),
+	});
 
 	return (
 		<section className="space-y-6 rounded-3xl border border-base-200 bg-base-100 p-6 shadow-xl">

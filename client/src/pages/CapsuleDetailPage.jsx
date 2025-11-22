@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatDate, getCapsule, unlockCapsule } from '../api/capsules.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 const STATUS_COPY = {
 	locked: 'Locked: provide the passphrase below to reveal it.',
@@ -19,11 +20,12 @@ function CapsuleDetailPage() {
 	const queryClient = useQueryClient();
 	const [passphrase, setPassphrase] = useState('');
 	const [unlockMessage, setUnlockMessage] = useState(null);
+	const { token } = useAuth();
 
 	const { data, isLoading, isError, error } = useQuery({
-		queryKey: ['capsule', capsuleId],
-		queryFn: () => getCapsule(capsuleId),
-		enabled: Boolean(capsuleId),
+		queryKey: ['capsule', capsuleId, token],
+		queryFn: () => getCapsule(capsuleId, token),
+		enabled: Boolean(capsuleId && token),
 	});
 
 	const capsule = data?.capsule;
@@ -31,12 +33,12 @@ function CapsuleDetailPage() {
 	const isNotFound = data?.status === 404 || capsuleError === 'CapsuleNotFound';
 
 	const unlockMutation = useMutation({
-		mutationFn: (value) => unlockCapsule(capsuleId, value),
+		mutationFn: async (value) => unlockCapsule(capsuleId, value, token),
 		onSuccess: (result) => {
 			setUnlockMessage(result);
 			if (result.status === 200) {
 				setPassphrase('');
-				queryClient.invalidateQueries({ queryKey: ['capsule', capsuleId] });
+				queryClient.invalidateQueries({ queryKey: ['capsule', capsuleId, token] });
 			}
 		},
 	});

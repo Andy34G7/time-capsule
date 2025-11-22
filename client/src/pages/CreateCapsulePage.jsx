@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createCapsule } from '../api/capsules.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 const defaultValues = {
 	title: '',
@@ -15,11 +16,12 @@ function CreateCapsulePage() {
 	const [formValues, setFormValues] = useState(defaultValues);
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { token } = useAuth();
 
 	const mutation = useMutation({
-		mutationFn: createCapsule,
+		mutationFn: async (payload) => createCapsule(payload, token),
 		onSuccess: (savedCapsule) => {
-			queryClient.invalidateQueries({ queryKey: ['capsules'] });
+			queryClient.invalidateQueries({ queryKey: ['capsules', token] });
 			navigate(`/capsules/${savedCapsule.id}`);
 		},
 	});
@@ -120,8 +122,8 @@ function CreateCapsulePage() {
 						className="input input-bordered w-full"
 					/>
 				</label>
-				<button type="submit" className="btn btn-primary" disabled={mutation.isPending}>
-					{mutation.isPending ? 'Saving…' : 'Create capsule'}
+				<button type="submit" className="btn btn-primary" disabled={mutation.isPending || !token}>
+					{mutation.isPending ? 'Saving…' : !token ? 'Waiting for login…' : 'Create capsule'}
 				</button>
 			</form>
 			{mutation.isError && (
