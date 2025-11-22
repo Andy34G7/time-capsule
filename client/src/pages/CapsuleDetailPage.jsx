@@ -32,6 +32,12 @@ function CapsuleDetailPage() {
 	const capsuleError = data?.error;
 	const isNotFound = data?.status === 404 || capsuleError === 'CapsuleNotFound';
 
+	const unlockedCapsule = unlockMessage?.status === 200 && unlockMessage?.capsule ? unlockMessage.capsule : null;
+	const effectiveCapsule = unlockedCapsule || capsule;
+	const messageVisible = Boolean(effectiveCapsule?.message);
+	const derivedStatusKey = messageVisible ? 'available' : capsuleError ?? (capsule?.isLocked ? 'locked' : 'available');
+	const showUnlockForm = capsule?.isLocked && !messageVisible;
+
 	const unlockMutation = useMutation({
 		mutationFn: async (value) => unlockCapsule(capsuleId, value, token),
 		onSuccess: (result) => {
@@ -66,7 +72,7 @@ function CapsuleDetailPage() {
 		);
 	}
 
-	const statusCopy = describeStatus(capsuleError ?? 'available');
+	const statusCopy = describeStatus(derivedStatusKey);
 
 	return (
 		<section className="space-y-6 rounded-3xl border border-base-200 bg-base-100 p-6 shadow-xl">
@@ -94,20 +100,22 @@ function CapsuleDetailPage() {
 				</div>
 				<div>
 					<dt className="text-xs font-semibold uppercase tracking-widest text-base-content/50">Locked</dt>
-					<dd className="mt-1 font-semibold text-base-content">{capsule?.isLocked ? 'Yes' : 'No'}</dd>
+					<dd className="mt-1 font-semibold text-base-content">
+						{messageVisible ? 'No (unlocked)' : capsule?.isLocked ? 'Yes' : 'No'}
+					</dd>
 				</div>
 			</dl>
 
 			<section className="rounded-2xl bg-base-200/70 p-6">
 				<h3 className="text-xl font-semibold text-base-content">Message</h3>
-				{capsule?.message ? (
-					<p className="mt-3 whitespace-pre-wrap text-base text-base-content">{capsule.message}</p>
+				{messageVisible ? (
+					<p className="mt-3 whitespace-pre-wrap text-base text-base-content">{effectiveCapsule?.message}</p>
 				) : (
 					<p className="mt-3 text-sm text-base-content/70">Message is hidden until the capsule unlocks.</p>
 				)}
 			</section>
 
-			{capsule?.isLocked && (
+			{showUnlockForm && (
 				<section className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-6">
 					<h3 className="text-xl font-semibold text-base-content">Unlock</h3>
 					<p className="mt-2 text-sm text-base-content/70">Provide the passphrase that was set when creating the capsule.</p>
