@@ -28,6 +28,21 @@ function messageAvailableFlag(capsule, messageAvailable) {
   return sanitized;
 }
 
+function normalizeAttachmentForStorage(attachment, capsuleId, timestamp) {
+  return {
+    id: uuidv4(),
+    capsuleId,
+    fileName: attachment.fileName,
+    contentType: attachment.contentType,
+    sizeBytes: attachment.size,
+    size: attachment.size,
+    width: attachment.width ?? null,
+    height: attachment.height ?? null,
+    fileId: attachment.fileId || null,
+    createdAt: timestamp,
+  };
+}
+
 async function createCapsule(payload, ownerId) {
   assertOwner(ownerId);
   const now = new Date().toISOString();
@@ -47,8 +62,16 @@ async function createCapsule(payload, ownerId) {
     passphraseHash,
   };
 
-  await storage.saveCapsule(capsule);
-  return messageAvailableFlag(capsule, !isLocked && new Date(revealAt) <= new Date(now));
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments.map((attachment) => normalizeAttachmentForStorage(attachment, capsule.id, now))
+    : [];
+
+  await storage.saveCapsule(capsule, attachments);
+  const capsuleWithAttachments = { ...capsule, attachments };
+  return messageAvailableFlag(
+    capsuleWithAttachments,
+    !isLocked && new Date(revealAt) <= new Date(now),
+  );
 }
 // shw capsule reveal dates without sending message body to the client
 async function listCapsuleSummaries(ownerId) {

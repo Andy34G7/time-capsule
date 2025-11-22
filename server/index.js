@@ -5,6 +5,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const capsuleRoutes = require('./routes/capsuleRoutes');
 const authRoutes = require('./routes/authRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/capsules', capsuleRoutes);
+app.use('/api/uploads', uploadRoutes);
 
 app.use((req, res) => {
 	res.status(404).json({ error: 'RouteNotFound' });

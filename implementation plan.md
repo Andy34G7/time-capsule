@@ -130,12 +130,13 @@ CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);
 - Provide a seed script to load sample capsules via SQL so developers mimic production behavior.
 - Use `.env` to set the Turso URL/token only when remote access is required.
 
-### 4.4 Media Storage (S3 Bucket)
+### 4.4 Media Storage (Backblaze B2)
 
-- Store binary assets (images, audio, video) in a dedicated Amazon S3 bucket (e.g., `time-capsule-media`) while Turso retains only metadata and permissions.
+- Store binary assets (images, audio, video) in a private Backblaze B2 bucket while Turso retains only metadata and permissions. Bucket prefixes such as `capsules/images/{ownerId}` keep objects namespaced per user.
 - Enforce high-compression uploads: images are transcoded to WebP/AVIF with quality ~70 and max resolution caps; videos are re-encoded to H.265/AV1 with capped bitrates (e.g., 5 Mbps 1080p) before being marked ready in Turso.
-- Use Lambda@Edge or a media-processing Lambda/Step Functions workflow to handle compression immediately after upload, updating Turso rows with final object keys, sizes, and checksums.
-- Enable S3 lifecycle tiers (Intelligent-Tiering + Glacier Deep Archive) for unretrieved media after N days while keeping metadata live in Turso.
+- Reject raw uploads above 2 MB (configurable via `MEDIA_MAX_IMAGE_BYTES`) so uncompressed assets never exhaust bandwidth or storage before the conversion step.
+- Leverage worker functions (Lambda, OCI Functions, or a lightweight VM process) to perform compression immediately after upload, updating Turso rows with final object keys, sizes, and checksums.
+- Apply B2 lifecycle rules to auto-transition cold data to the lowest-cost class while leaving metadata live in Turso.
 
 ## 5. Passphrase & Authorization Model
 
@@ -161,8 +162,8 @@ CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);
 
 1. Initialize `serverless.yml` with HTTP events, environment variables for Turso credentials, and least-privilege IAM (no object-storage permissions required).
 2. Package Express with `serverless-http`; ensure the Turso client is instantiated lazily so Lambda cold starts stay fast.
-3. Grant the Lambda role scoped S3 permissions (`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`) for the media bucket so the API can mint pre-signed URLs and clean up unused uploads.
-4. Store `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `MEDIA_BUCKET`, `MEDIA_MAX_IMAGE_RES`, and `MEDIA_MAX_VIDEO_BITRATE` in Parameter Store or Secrets Manager; inject them as environment variables.
+3. Provision Backblaze B2 application keys (separate read/write scopes) and store them as encrypted environment variables so the API can mint upload URLs and clean up unused uploads.
+4. Store `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `MEDIA_BUCKET`, `MEDIA_MAX_IMAGE_RES`, `MEDIA_MAX_VIDEO_BITRATE`, and the B2 credentials in Parameter Store or Secrets Manager; inject them as environment variables.
 5. Run migrations (SQL files or drizzle-kit) as part of deployment before the new Lambda version goes live.
 
 ### 7.2 Alternative Hosts (Render/Fly/Containers)
@@ -203,14 +204,14 @@ This plan provides the necessary runway to implement and deploy a secure, server
 
 #### Phase 2 – Image Attachments
 
-- Extend the API with a pre-signed upload endpoint (`POST /api/uploads/images`) returning temporary S3 URLs scoped to `time-capsule-media/images/{id}`.
+- Extend the API with a pre-signed upload endpoint (`POST /api/uploads/images`) returning Backblaze B2 upload URLs scoped to `capsules/images/{ownerId}` prefixes, and a companion endpoint (`POST /api/uploads/images/compress`) that accepts a raw upload, converts it to WebP via `sharp`, enforces `MEDIA_MAX_IMAGE_RES`, and then stores the compressed result in B2.
 - Store attachment metadata (object key, mime type, size, compression level) in Turso, keyed by capsule ID; render via signed GET URLs when revealed.
 - Add a compression job (Lambda or AWS Step Functions) that converts uploads to WebP/AVIF, downscales oversized images, and updates Turso once complete.
 - Add client-side previews and upload size validation (soft limit ~10 MB per raw image to keep Lambda memory low).
 
 #### Phase 3 – Video Capsules
 
-- Reuse the pre-signed upload flow but enforce chunked uploads to S3 and stricter size caps (e.g., 100 MB) with a transcoding job (AWS MediaConvert or Mux) for future quality control.
+- Reuse the pre-signed upload flow but enforce chunked uploads to B2 and stricter size caps (e.g., 100 MB) with a transcoding job (AWS MediaConvert, Mux, or B2-compatible worker) for future quality control.
 - Apply high-compression presets (e.g., H.265 1080p @ 4 Mbps + adaptive bitrate ladder) during transcoding; update Turso metadata with rendition keys and bitrates.
 - Store transcoding status/state machine fields in Turso so reveal logic only returns signed URLs once the compressed outputs exist.
 

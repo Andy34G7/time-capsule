@@ -48,6 +48,19 @@ async function ensureSchema() {
         'CREATE INDEX IF NOT EXISTS idx_capsules_reveal ON capsules (reveal_at);',
         'CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);',
         'CREATE INDEX IF NOT EXISTS idx_capsules_owner ON capsules (owner_id);',
+        `CREATE TABLE IF NOT EXISTS capsule_attachments (
+          id TEXT PRIMARY KEY,
+          capsule_id TEXT NOT NULL,
+          file_name TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          width INTEGER,
+          height INTEGER,
+          file_id TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (capsule_id) REFERENCES capsules(id) ON DELETE CASCADE
+        );`,
+        'CREATE INDEX IF NOT EXISTS idx_capsule_attachments_capsule ON capsule_attachments (capsule_id);',
       ];
 
       for (const sql of statements) {
