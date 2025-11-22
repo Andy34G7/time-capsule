@@ -3,7 +3,7 @@
 ## 1. Objectives
 
 - Provide a minimal-but-extensible time capsule web app where users can submit messages ("capsules") to be revealed now or in the future.
-- Persist capsules indefinitely via JSON stored in Amazon S3 so the solution works on serverless platforms without local disk.
+- Persist capsules indefinitely in Turso (serverless SQLite) so the solution works on serverless platforms without local disk while supporting relational queries.
 - Require a per-capsule passphrase whenever the creator supplies one; otherwise capsules are public once their reveal date passes.
 - Keep the stack lightweight (Node.js + Express) while leaving room to bolt on richer auth or database layers later.
 
@@ -11,11 +11,11 @@
 
 1. **Client**: React single-page app (Vite) styled with Tailwind CSS + DaisyUI components, served from the same Express app (or separately via CDN) that handles capsule creation (POST) and listing (GET).
 2. **API Layer**: Express wrapped with `serverless-http` and deployed to AWS Lambda + API Gateway (or compatible serverless host). The API exposes `/api/capsules` endpoints.
-3. **Persistence**: A dedicated S3 bucket (e.g., `time-capsule-prod`) storing JSON documents. Each capsule writes as `capsules/{id}.json`; an index file (e.g., `capsules/index.json`) caches metadata for fast listings.
-4. **Secrets & Config**: Environment variables managed by the serverless platform (Lambda environment, Render secrets) for bucket name, AWS credentials, bcrypt cost, optional admin override key, etc.
+3. **Persistence**: Turso database (libSQL over HTTP) hosting a normalized `capsules` table. Every request executes SQL through the shared driver, and indexes handle reveal-time lookups without loading entire datasets.
+4. **Secrets & Config**: Environment variables managed by the serverless platform (Lambda environment, Render secrets) for `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, bcrypt cost, optional admin override key, etc.
 
 ```text
-Client (fetch) -> API Gateway -> Lambda (Express) -> S3 (JSON storage)
+Client (fetch) -> API Gateway -> Lambda (Express) -> Turso (serverless SQLite)
 ```
 
 ## 3. Backend Implementation (Node + Express)
@@ -26,12 +26,13 @@ Client (fetch) -> API Gateway -> Lambda (Express) -> S3 (JSON storage)
 
 - `express` for routing.
 - `serverless-http` to run Express on Lambda.
-- `@aws-sdk/client-s3` for S3 access without bundling the entire v2 SDK.
+- `@libsql/client` for Turso/libSQL queries (HTTP-friendly and works in serverless runtimes).
 - `uuid` for capsule IDs.
 - `bcryptjs` for passphrase hashing and comparison.
 - `zod` (or similar) for validating payloads.
 - `dotenv` for local development configuration.
 - `cors` and `helmet` for request hardening when the React SPA is hosted separately.
+- Turso-aware migration tooling (e.g., Turso CLI or drizzle-kit) to apply schema changes alongside deploys.
 
 #### Backend dev & test
 
@@ -62,13 +63,13 @@ Client (fetch) -> API Gateway -> Lambda (Express) -> S3 (JSON storage)
 │  │  └─ capsuleController.js
 │  ├─ services/
 │  │  ├─ capsuleService.js   # business logic
-│  │  └─ storageService.js   # S3 helpers
+│  │  └─ storageService.js   # Turso persistence helpers
 │  ├─ middleware/
 │  │  └─ passphraseGuard.js
 │  └─ utils/
 │     ├─ validation.js
 │     └─ logger.js
-├─ data/                  # local dev JSON cache (optional)
+├─ data/                  # local dev SQLite file + seed data
 ├─ public/                # static site
 └─ implementation plan.md
 ```
@@ -77,8 +78,8 @@ Client (fetch) -> API Gateway -> Lambda (Express) -> S3 (JSON storage)
 
 1. Client submits capsule payload (message, revealAt ISO date, optional passphrase).
 2. Controller validates payload; service hashes passphrase if provided.
-3. Service writes capsule JSON to S3 and updates metadata index.
-4. For GET requests, service reads index, filters for capsules whose reveal date has passed (or belongs to caller if they possess passphrase), and fetches full capsule documents as needed.
+3. Service writes the capsule row to Turso inside a single `INSERT`, letting the DB enforce uniqueness and durability.
+4. For GET requests, service issues parameterized `SELECT` queries scoped by reveal thresholds or capsule ID rather than loading every record into memory.
 
 ### 3.4 API Endpoints
 
@@ -93,39 +94,46 @@ All responses should include `createdAt`, `revealAt`, `isLocked`, and omit the h
 
 ## 4. Data & Storage Strategy
 
-### 4.1 Capsule Schema (stored JSON)
+### 4.1 Capsule Schema (Turso SQL)
 
-```json
-{
-  "id": "uuidv4",
-  "title": "string",
-  "message": "string",
-  "author": "string | null",
-  "createdAt": "ISO timestamp",
-  "revealAt": "ISO timestamp",
-  "isLocked": true,
-  "passphraseHash": "$2a$10$..." | null
-}
+```sql
+CREATE TABLE IF NOT EXISTS capsules (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  author TEXT,
+  created_at TEXT NOT NULL,
+  reveal_at TEXT NOT NULL,
+  is_locked INTEGER NOT NULL DEFAULT 0,
+  passphrase_hash TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_capsules_reveal ON capsules (reveal_at);
+CREATE INDEX IF NOT EXISTS idx_capsules_locked ON capsules (is_locked);
 ```
 
-### 4.2 S3 Layout
+- Store all datetimes as ISO-8601 strings so comparisons sort lexicographically.
+- `is_locked` stays `1` even after reveal to enforce passphrase unlocking.
+- Future columns (attachments, template references) can be appended via migrations.
 
-```text
-s3://time-capsule-prod/
-├─ capsules/
-│  ├─ {id}.json
-│  └─ index.json          # array of capsule metadata (without content or hashes)
-└─ logs/                  # optional request or audit logs
-```
- 
-- `index.json` includes cached metadata (`id`, `title`, `createdAt`, `revealAt`, `isLocked`). Lambda updates this file after each mutation to keep listing fast.
-- Use S3 object versioning for safety and to support rollback.
-- Apply `.keep indefinitely` policy by disabling lifecycle expiration; optionally enable Glacier tiering for cost savings on older versions.
+### 4.2 Query & Access Patterns
+
+- `listCapsuleSummaries`: `SELECT ... ORDER BY reveal_at LIMIT ? OFFSET ?` to support pagination instead of scanning the whole table.
+- `getCapsuleStatus`: parameterized lookup by `id`, with reveal gating handled in application code after fetching.
+- `unlockCapsule`: fetch the hash by `id` and compare via bcrypt before returning the message payload.
+- Rely on Turso's MVCC to handle concurrent writes; no need for homegrown file locking.
 
 ### 4.3 Local Development
 
-- Provide a fallback JSON file under `/data/capsules-dev.json` so the API works without AWS credentials.
-- Storage service decides target via `NODE_ENV` and environment toggles.
+- Default to an on-disk SQLite file using the libSQL driver (`file:server/data/capsules.db`) when `TURSO_DATABASE_URL` is unset.
+- Provide a seed script to load sample capsules via SQL so developers mimic production behavior.
+- Use `.env` to set the Turso URL/token only when remote access is required.
+
+### 4.4 Media Storage (S3 Bucket)
+
+- Store binary assets (images, audio, video) in a dedicated Amazon S3 bucket (e.g., `time-capsule-media`) while Turso retains only metadata and permissions.
+- Enforce high-compression uploads: images are transcoded to WebP/AVIF with quality ~70 and max resolution caps; videos are re-encoded to H.265/AV1 with capped bitrates (e.g., 5 Mbps 1080p) before being marked ready in Turso.
+- Use Lambda@Edge or a media-processing Lambda/Step Functions workflow to handle compression immediately after upload, updating Turso rows with final object keys, sizes, and checksums.
+- Enable S3 lifecycle tiers (Intelligent-Tiering + Glacier Deep Archive) for unretrieved media after N days while keeping metadata live in Turso.
 
 ## 5. Passphrase & Authorization Model
 
@@ -145,40 +153,42 @@ s3://time-capsule-prod/
 - Use React Query (or SWR) with Fetch API to handle JSON requests, cache responses, and surface error states (bad passphrase, validation errors) via DaisyUI alerts/toasts.
 - Consider progressive enhancement by exposing a minimal HTML form fallback served alongside the SPA for non-JS environments.
 
-## 7. Deployment Strategy (Serverless + S3)
+## 7. Deployment Strategy (Serverless + Turso)
 
 ### 7.1 AWS Lambda via Serverless Framework
 
-1. Initialize `serverless.yml` with functions, IAM permissions (S3 read/write), environment variables, and HTTP events.
-2. Package Express using `serverless-http` handler export.
-3. Configure S3 bucket name via `CUSTOM_BUCKET` env var; set bucket policy to restrict access to the Lambda IAM role.
-4. Provision CloudFront (optional) for caching static assets; otherwise host `public/` files via S3 static hosting or serve from Lambda at `/`.
-5. Use AWS Systems Manager Parameter Store or Secrets Manager to store `ADMIN_OVERRIDE_KEY`, `BCRYPT_ROUNDS`, etc.
+1. Initialize `serverless.yml` with HTTP events, environment variables for Turso credentials, and least-privilege IAM (no object-storage permissions required).
+2. Package Express with `serverless-http`; ensure the Turso client is instantiated lazily so Lambda cold starts stay fast.
+3. Grant the Lambda role scoped S3 permissions (`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`) for the media bucket so the API can mint pre-signed URLs and clean up unused uploads.
+4. Store `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `MEDIA_BUCKET`, `MEDIA_MAX_IMAGE_RES`, and `MEDIA_MAX_VIDEO_BITRATE` in Parameter Store or Secrets Manager; inject them as environment variables.
+5. Run migrations (SQL files or drizzle-kit) as part of deployment before the new Lambda version goes live.
 
-### 7.2 Render Free Tier (Fallback)
+### 7.2 Alternative Hosts (Render/Fly/Containers)
 
-- If Render is needed, enable persistent disk or mount an S3-compatible storage (Render supports native S3 via IAM user). The same Express app can run as a long-lived service; only the storage service changes (still S3).
+- Long-running hosts can reuse the same Express app; just set the Turso credentials as environment variables and allow outbound HTTPS to Turso.
+- Keep a health check that pings `/health` and optionally runs a lightweight Turso query to confirm connectivity.
 
 ### 7.3 CI/CD
 
-- Add GitHub Actions workflow that lints, runs tests, and deploys via `serverless deploy` (with OIDC or deploy key) on merges to `main`.
+- GitHub Actions workflow should lint, run tests, execute migrations against the Turso staging database, and then deploy via `serverless deploy` or container pushes.
+- Store Turso admin tokens as repo secrets and scope them to staging/prod DBs separately.
 
 ## 8. Testing & Observability
 
-1. **Unit Tests**: Cover validation, storage service S3 interactions (mocked), and passphrase guard logic using `vitest` or `jest`.
+1. **Unit Tests**: Cover validation, storage service Turso queries (mocked via an in-memory libSQL client), and passphrase guard logic using `vitest` or `jest`.
 2. **Integration Tests**: Use `supertest` to hit the Express router with in-memory storage.
 3. **Smoke Test Script**: CLI that creates a temp capsule, fetches listings, unlocks it, and cleans up.
-4. **Monitoring**: Enable CloudWatch logs for Lambda; configure alarms on error rates or duration spikes.
-5. **Tracing**: Optional X-Ray instrumentation for debugging S3 latency.
+4. **Monitoring**: Enable CloudWatch logs for Lambda; configure alarms on error rates, Turso connection failures, or slow SQL queries.
+5. **Tracing**: Optional X-Ray instrumentation to watch outbound Turso calls and measure query latency.
 
 ## 9. Future Enhancements
 
-- Email reminders when a capsule becomes available (SNS + SES).
+- Email reminders when a capsule becomes available (Resend, SES, or any transactional email provider).
 - User accounts for managing personal capsules instead of passphrases.
-- Full-text search using OpenSearch or DynamoDB secondary indexes.
+- Full-text search using Turso full-text virtual tables or an external search service (Typesense, OpenSearch).
 - Export/import capsules as encrypted bundles for offline archiving.
 
-This plan provides the necessary runway to implement and deploy a secure, serverless time capsule service with indefinite JSON storage in S3 and per-capsule passphrase protection.
+This plan provides the necessary runway to implement and deploy a secure, serverless time capsule service with Turso-backed storage and per-capsule passphrase protection.
 
 ## 10. Feature Roadmap
 
@@ -187,22 +197,24 @@ This plan provides the necessary runway to implement and deploy a secure, server
 #### Phase 1 – Text Capsules (MVP)
 
 - Deliver the core text-only flow already described in sections 3–6.
-- Ensure the S3 schema accommodates future media fields (e.g., optional `attachments` array) to avoid migrations.
+- Ensure the Turso schema anticipates future media metadata (e.g., optional `attachments` table or JSON column) to avoid disruptive migrations.
 
 #### Phase 2 – Image Attachments
 
-- Extend the API with a pre-signed upload endpoint (`POST /api/uploads/images`) returning temporary S3 URLs.
-- Store attachment metadata (key, mime type, size) alongside the capsule; render via signed GET URLs when revealed.
-- Add client-side previews and upload size validation (soft limit ~10 MB per image to keep Lambda memory low).
+- Extend the API with a pre-signed upload endpoint (`POST /api/uploads/images`) returning temporary S3 URLs scoped to `time-capsule-media/images/{id}`.
+- Store attachment metadata (object key, mime type, size, compression level) in Turso, keyed by capsule ID; render via signed GET URLs when revealed.
+- Add a compression job (Lambda or AWS Step Functions) that converts uploads to WebP/AVIF, downscales oversized images, and updates Turso once complete.
+- Add client-side previews and upload size validation (soft limit ~10 MB per raw image to keep Lambda memory low).
 
 #### Phase 3 – Video Capsules
 
-- Reuse the pre-signed upload flow but enforce chunked uploads and stricter size caps (e.g., 100 MB) with a transcoding job placeholder (AWS MediaConvert) for future quality control.
-- Store transcoding status in capsule metadata; block reveal until processing completes.
+- Reuse the pre-signed upload flow but enforce chunked uploads to S3 and stricter size caps (e.g., 100 MB) with a transcoding job (AWS MediaConvert or Mux) for future quality control.
+- Apply high-compression presets (e.g., H.265 1080p @ 4 Mbps + adaptive bitrate ladder) during transcoding; update Turso metadata with rendition keys and bitrates.
+- Store transcoding status/state machine fields in Turso so reveal logic only returns signed URLs once the compressed outputs exist.
 
 #### Phase 4 – Template Library & Submissions
 
-- Define a `templates` collection in S3 (or DynamoDB) describing structured prompts (fields, validation rules).
+- Define a `templates` table in Turso describing structured prompts (fields, validation rules).
 - The UI allows choosing a template to pre-fill the capsule form; creators can submit new templates for moderation via `/api/templates`.
 - Implement a simple moderation queue (admin override key + status field) before templates go live.
 

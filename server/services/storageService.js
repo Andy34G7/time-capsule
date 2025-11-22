@@ -1,45 +1,57 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
+const { getClient, ensureSchema } = require('./dbClient');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DATA_FILE = path.join(DATA_DIR, 'capsules-dev.json');
-
-async function ensureDataFile() {
-	try {
-		await fs.access(DATA_FILE);
-	} catch (error) {
-		await fs.mkdir(DATA_DIR, { recursive: true });
-		await fs.writeFile(DATA_FILE, '[]');
+function mapRowToCapsule(row) {
+	if (!row) {
+		return null;
 	}
-}
-
-async function readCapsules() {
-	await ensureDataFile();
-	const raw = await fs.readFile(DATA_FILE, 'utf8');
-	try {
-		return JSON.parse(raw || '[]');
-	} catch (error) {
-		return [];
-	}
-}
-
-async function writeCapsules(capsules) {
-	await fs.writeFile(DATA_FILE, JSON.stringify(capsules, null, 2));
+	return {
+		id: row.id,
+		title: row.title,
+		message: row.message,
+		author: row.author,
+		createdAt: row.created_at,
+		revealAt: row.reveal_at,
+		isLocked: Boolean(row.is_locked),
+		passphraseHash: row.passphrase_hash,
+	};
 }
 
 async function getCapsules() {
-	return readCapsules();
+	await ensureSchema();
+	const db = getClient();
+	const { rows } = await db.execute(
+		'SELECT id, title, message, author, created_at, reveal_at, is_locked, passphrase_hash FROM capsules ORDER BY datetime(created_at) DESC',
+	);
+	return rows.map(mapRowToCapsule);
 }
 
 async function getCapsuleById(id) {
-	const capsules = await readCapsules();
-	return capsules.find((capsule) => capsule.id === id) || null;
+	await ensureSchema();
+	const db = getClient();
+	const { rows } = await db.execute(
+		' SELECT id, title, message, author, created_at, reveal_at, is_locked, passphrase_hash FROM capsules WHERE id = ? LIMIT 1 ',
+		[id],
+	);
+	return mapRowToCapsule(rows[0]);
 }
 
 async function saveCapsule(capsule) {
-	const capsules = await readCapsules();
-	capsules.push(capsule);
-	await writeCapsules(capsules);
+	await ensureSchema();
+	const db = getClient();
+	await db.execute(
+		`INSERT INTO capsules (id, title, message, author, created_at, reveal_at, is_locked, passphrase_hash)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		[
+			capsule.id,
+			capsule.title,
+			capsule.message,
+			capsule.author,
+			capsule.createdAt,
+			capsule.revealAt,
+			capsule.isLocked ? 1 : 0,
+			capsule.passphraseHash,
+		],
+	);
 	return capsule;
 }
 
