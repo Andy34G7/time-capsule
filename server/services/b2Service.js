@@ -158,6 +158,7 @@ async function uploadCompressedImage({ ownerId, buffer, contentType, originalFil
 	await authorize();
 	const b2 = getClient();
 	const fileName = buildObjectKey({ ownerId, originalFileName, contentType });
+	const uploadTarget = await b2.getUploadUrl({ bucketId: B2_BUCKET_ID });
 	const fileInfo = {};
 	if (metadata?.width) {
 		fileInfo['src-width'] = String(metadata.width);
@@ -169,11 +170,12 @@ async function uploadCompressedImage({ ownerId, buffer, contentType, originalFil
 		fileInfo['src-format'] = metadata.format;
 	}
 	const upload = await b2.uploadFile({
-		bucketId: B2_BUCKET_ID,
 		fileName,
 		data: buffer,
-		contentType,
+		mime: contentType,
 		info: Object.keys(fileInfo).length ? fileInfo : undefined,
+		uploadUrl: uploadTarget.data.uploadUrl,
+		uploadAuthToken: uploadTarget.data.authorizationToken,
 	});
 	return {
 		fileId: upload.data.fileId,
