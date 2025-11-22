@@ -10,12 +10,24 @@ router.use(requireAuth());
 //dev note: schema is to set certain rules for the objects we create. 
 //usually good practice to have a schema validation to avoid bad data being processed
 // @Andy34G7: i was asked to use zod during my internship at comono, that's carried over here
+const attachmentSchema = z.object({
+	fileName: z.string().min(1).max(255),
+	contentType: z.string().min(1).refine((value) => value.startsWith('image/'), {
+		message: 'Only image attachments are supported',
+	}),
+	size: z.number().int().min(1),
+	width: z.number().int().min(1).max(8000).optional(),
+	height: z.number().int().min(1).max(8000).optional(),
+	fileId: z.string().min(1).optional(),
+});
+
 const createCapsuleSchema = z.object({
 	title: z.string().min(1).max(120),
 	message: z.string().min(1).max(2000),
 	author: z.string().min(1).max(80).optional(),
 	revealAt: z.string().datetime({ offset: true }), //datetime is deprecated apparently, need to look for alternatives
 	passphrase: z.string().min(6).max(128).optional(),
+	attachments: z.array(attachmentSchema).max(5).optional(),
 });
 
 // schema for the passphrase unlocking the capsule. for now, it has to be atleast 1 character
