@@ -4,6 +4,42 @@ import { useNavigate } from 'react-router-dom';
 import { createCapsule } from '../api/capsules.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
+const REVEAL_PRESETS = [
+	{ label: 'In 1 week', days: 7 },
+	{ label: 'In 1 month', months: 1 },
+	{ label: 'In 3 months', months: 3 },
+	{ label: 'In 6 months', months: 6 },
+	{ label: 'In 1 year', years: 1 },
+];
+
+function formatLocalDateInput(date) {
+	const pad = (value) => String(value).padStart(2, '0');
+	const year = date.getFullYear();
+	const month = pad(date.getMonth() + 1);
+	const day = pad(date.getDate());
+	const hours = pad(date.getHours());
+	const minutes = pad(date.getMinutes());
+	return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function applyPreset(delta) {
+	const date = new Date();
+	const next = new Date(date);
+	if (delta.years) {
+		next.setFullYear(next.getFullYear() + delta.years);
+	}
+	if (delta.months) {
+		next.setMonth(next.getMonth() + delta.months);
+	}
+	if (delta.days) {
+		next.setDate(next.getDate() + delta.days);
+	}
+	if (delta.hours) {
+		next.setHours(next.getHours() + delta.hours);
+	}
+	return next;
+}
+
 const defaultValues = {
 	title: '',
 	author: '',
@@ -17,6 +53,11 @@ function CreateCapsulePage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { token } = useAuth();
+
+	const handlePreset = (delta) => {
+		const targetDate = applyPreset(delta);
+		setFormValues((prev) => ({ ...prev, revealAt: formatLocalDateInput(targetDate) }));
+	};
 
 	const mutation = useMutation({
 		mutationFn: async (payload) => createCapsule(payload, token),
@@ -108,6 +149,21 @@ function CreateCapsulePage() {
 						className="input input-bordered w-full"
 						required
 					/>
+					<div className="label mt-2 flex-wrap gap-2">
+						<span className="label-text text-xs uppercase tracking-widest text-base-content/60">Quick picks</span>
+						<div className="flex flex-wrap gap-2">
+							{REVEAL_PRESETS.map((preset) => (
+								<button
+									type="button"
+									key={preset.label}
+									className="btn btn-xs"
+									onClick={() => handlePreset(preset)}
+								>
+									{preset.label}
+								</button>
+							))}
+						</div>
+					</div>
 				</label>
 				<label className="form-control w-full">
 					<div className="label">

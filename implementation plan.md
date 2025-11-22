@@ -196,7 +196,7 @@ This plan provides the necessary runway to implement and deploy a secure, server
 
 ### 10.1 Milestone Steps
 
-#### Phase 1 – Text Capsules (MVP)
+#### Phase 1 – Text Capsules (MVP) (Done)
 
 - Deliver the core text-only flow already described in sections 3–6.
 - Ensure the Turso schema anticipates future media metadata (e.g., optional `attachments` table or JSON column) to avoid disruptive migrations.
@@ -226,7 +226,7 @@ This plan provides the necessary runway to implement and deploy a secure, server
 - Build lightweight Canvas or JS games (e.g., quiz, memory) hosted under `/public/games` with the ability to save scores via `/api/capsules/:id/game-state`.
 - On reveal, display historical scores/leaderboards to revisit.
 
-#### Phase 6 – OAuth Login & Private Capsules
+#### Phase 6 – OAuth Login & Private Capsules (Done)
 
 - Integrate OAuth (Auth0, Cognito, Supabase, or custom OpenID Connect) to issue JWTs containing a stable `sub` claim stored as `owner_id` in Turso.
 - Expand capsule routes to require authentication for creation/listing when `owner_id` is enabled, ensuring each account only sees its own future-dated capsules while still allowing public capsules with `owner_id = NULL`.
