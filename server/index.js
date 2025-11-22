@@ -4,6 +4,7 @@ const serverless = require('serverless-http');
 const cors = require('cors');
 const helmet = require('helmet');
 const capsuleRoutes = require('./routes/capsuleRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.get('/health', (req, res) => {
 	res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.use('/api/auth', authRoutes);
 app.use('/api/capsules', capsuleRoutes);
 
 app.use((req, res) => {
