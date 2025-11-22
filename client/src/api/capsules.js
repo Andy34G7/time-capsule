@@ -54,6 +54,32 @@ export async function unlockCapsule(capsuleId, passphrase, token) {
 	return { status, capsule: payload?.data ?? null, error: payload?.error ?? null };
 }
 
+export async function uploadCompressedImage(file, token) {
+	if (!file) {
+		throw new Error('FileRequired');
+	}
+	const formData = new FormData();
+	formData.append('image', file);
+	const response = await fetch(`${API_BASE_URL}/uploads/images/compress`, {
+		method: 'POST',
+		headers: {
+			...(token ? { Authorization: `Bearer ${token}` } : {}),
+		},
+		body: formData,
+	});
+	const contentType = response.headers.get('content-type') || '';
+	const isJson = contentType.includes('application/json');
+	const payload = isJson ? await response.json() : null;
+	if (!response.ok) {
+		const error = new Error(payload?.error || 'ImageUploadFailed');
+		error.status = response.status;
+		error.details = payload?.details;
+		error.payload = payload;
+		throw error;
+	}
+	return payload?.data ?? null;
+}
+
 export function formatDate(timestamp) {
 	if (!timestamp) return 'N/A';
 	const date = new Date(timestamp);
