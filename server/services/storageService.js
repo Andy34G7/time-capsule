@@ -9,6 +9,7 @@ function mapRowToCapsule(row) {
 		title: row.title,
 		message: row.message,
 		author: row.author,
+		ownerId: row.owner_id,
 		createdAt: row.created_at,
 		revealAt: row.reveal_at,
 		isLocked: Boolean(row.is_locked),
@@ -16,21 +17,28 @@ function mapRowToCapsule(row) {
 	};
 }
 
-async function getCapsules() {
+async function getCapsulesByOwner(ownerId) {
+	if (!ownerId) {
+		return [];
+	}
 	await ensureSchema();
 	const db = getClient();
 	const { rows } = await db.execute(
-		'SELECT id, title, message, author, created_at, reveal_at, is_locked, passphrase_hash FROM capsules ORDER BY datetime(created_at) DESC',
+		`SELECT id, title, message, author, owner_id, created_at, reveal_at, is_locked, passphrase_hash
+		 FROM capsules WHERE owner_id = ? ORDER BY datetime(created_at) DESC`,
+		[ownerId],
 	);
 	return rows.map(mapRowToCapsule);
 }
 
-async function getCapsuleById(id) {
+async function getCapsuleById(id, ownerId) {
 	await ensureSchema();
 	const db = getClient();
+	const params = ownerId ? [id, ownerId] : [id];
+	const whereClause = ownerId ? 'WHERE id = ? AND owner_id = ?' : 'WHERE id = ?';
 	const { rows } = await db.execute(
-		' SELECT id, title, message, author, created_at, reveal_at, is_locked, passphrase_hash FROM capsules WHERE id = ? LIMIT 1 ',
-		[id],
+		`SELECT id, title, message, author, owner_id, created_at, reveal_at, is_locked, passphrase_hash FROM capsules ${whereClause} LIMIT 1`,
+		params,
 	);
 	return mapRowToCapsule(rows[0]);
 }
@@ -39,13 +47,14 @@ async function saveCapsule(capsule) {
 	await ensureSchema();
 	const db = getClient();
 	await db.execute(
-		`INSERT INTO capsules (id, title, message, author, created_at, reveal_at, is_locked, passphrase_hash)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO capsules (id, title, message, author, owner_id, created_at, reveal_at, is_locked, passphrase_hash)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			capsule.id,
 			capsule.title,
 			capsule.message,
 			capsule.author,
+			capsule.ownerId,
 			capsule.createdAt,
 			capsule.revealAt,
 			capsule.isLocked ? 1 : 0,
@@ -56,7 +65,7 @@ async function saveCapsule(capsule) {
 }
 
 module.exports = {
-	getCapsules,
+	getCapsulesByOwner,
 	getCapsuleById,
 	saveCapsule,
 };
