@@ -205,8 +205,36 @@ async function saveCapsule(capsule, attachments = []) {
 	return { ...capsule, attachments };
 }
 
+async function deleteCapsule(capsuleId, ownerId) {
+	await ensureSchema();
+	const db = getClient();
+	const tx = await db.transaction('write');
+	let committed = false;
+	try {
+		await runStatement(tx, 'DELETE FROM capsule_attachments WHERE capsule_id = ?', [capsuleId]);
+		const result = await runStatement(
+			tx,
+			'DELETE FROM capsules WHERE id = ? AND owner_id = ?',
+			[capsuleId, ownerId],
+		);
+		if (!result.rowsAffected) {
+			await tx.rollback().catch(() => {});
+			return false;
+		}
+		await tx.commit();
+		committed = true;
+		return true;
+	} catch (error) {
+		if (!committed) {
+			await tx.rollback().catch(() => {});
+		}
+		throw error;
+	}
+}
+
 module.exports = {
 	getCapsulesByOwner,
 	getCapsuleById,
 	saveCapsule,
+	deleteCapsule,
 };

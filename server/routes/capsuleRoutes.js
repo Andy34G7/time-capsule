@@ -124,4 +124,16 @@ router.post('/:id/unlock', async (req, res, next) => {
 	}
 });
 
+router.delete('/:id', async (req, res, next) => {
+	try {
+		const result = await capsuleService.deleteCapsule(req.params.id, req.user?.sub);
+		if (result.status === 'not_found') {
+			return res.status(404).json({ error: 'CapsuleNotFound' });
+		}
+		return res.status(204).send();
+	} catch (error) {
+		next(error);
+	}
+});
+
 module.exports = router;

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { formatDate, getAttachmentDownload, getCapsule, unlockCapsule } from '../api/capsules.js';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { deleteCapsule as deleteCapsuleRequest, formatDate, getAttachmentDownload, getCapsule, unlockCapsule } from '../api/capsules.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const STATUS_COPY = {
@@ -42,6 +42,7 @@ function buildAuthorizedUrl(download) {
 function CapsuleDetailPage() {
 	const { capsuleId } = useParams();
 	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 	const [passphrase, setPassphrase] = useState('');
 	const [unlockMessage, setUnlockMessage] = useState(null);
 	const [attachmentDownloads, setAttachmentDownloads] = useState({});
@@ -82,6 +83,14 @@ function CapsuleDetailPage() {
 				setPassphrase('');
 				queryClient.invalidateQueries({ queryKey: ['capsule', capsuleId, token] });
 			}
+		},
+	});
+
+	const deleteMutation = useMutation({
+		mutationFn: async () => deleteCapsuleRequest(capsuleId, token),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['capsules', token] });
+			navigate('/');
 		},
 	});
 
@@ -150,6 +159,17 @@ function CapsuleDetailPage() {
 		};
 	}, [attachmentKey, attachments, canShowAttachments, token]);
 
+	const handleDelete = () => {
+		if (!capsuleId || !token || deleteMutation.isPending) {
+			return;
+		}
+		const confirmed = window.confirm('Delete this capsule permanently? This cannot be undone.');
+		if (!confirmed) {
+			return;
+		}
+		deleteMutation.mutate();
+	};
+
 	if (isLoading) {
 		return <div className="alert alert-info">Loading capsule…</div>;
 	}
@@ -183,9 +203,19 @@ function CapsuleDetailPage() {
 						{capsule?.author ? `By ${capsule.author}` : 'Anonymous'} · Created {formatDate(capsule?.createdAt)}
 					</p>
 				</div>
-				<Link to="/" className="btn btn-ghost">
-					Back to list
-				</Link>
+				<div className="flex flex-wrap gap-2">
+					<Link to="/" className="btn btn-ghost">
+						Back to list
+					</Link>
+					<button
+						type="button"
+						className="btn btn-error"
+						onClick={handleDelete}
+						disabled={deleteMutation.isPending}
+					>
+						{deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+					</button>
+				</div>
 			</header>
 
 			<dl className="grid gap-4 text-base-content/80 sm:grid-cols-3">
@@ -213,6 +243,10 @@ function CapsuleDetailPage() {
 					<p className="mt-3 text-sm text-base-content/70">Message is hidden until the capsule unlocks.</p>
 				)}
 			</section>
+
+			{deleteMutation.isError && (
+				<div className="alert alert-error">Delete failed: {deleteMutation.error?.message || 'Unknown error'}</div>
+			)}
 
 			{canShowAttachments && (
 				<section className="rounded-2xl bg-base-200/70 p-6">

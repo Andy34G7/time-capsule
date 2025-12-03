@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const storage = require('./storageService');
+const b2Service = require('./b2Service');
 
 const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 10);
 
@@ -145,9 +146,29 @@ async function unlockCapsule(id, passphrase, ownerId) {
   return { status: 'unlocked', capsule: messageAvailableFlag(capsule, true) };
 }
 
+async function deleteCapsule(id, ownerId) {
+  assertOwner(ownerId);
+  const capsule = await storage.getCapsuleById(id, ownerId);
+  if (!capsule) {
+    return { status: 'not_found' };
+  }
+  const attachments = capsule.attachments || [];
+  for (const attachment of attachments) {
+    if (attachment.fileName && attachment.fileId) {
+      await b2Service.deleteFileVersion(attachment.fileName, attachment.fileId);
+    }
+    if (attachment.poster?.fileName && attachment.poster?.fileId) {
+      await b2Service.deleteFileVersion(attachment.poster.fileName, attachment.poster.fileId);
+    }
+  }
+  await storage.deleteCapsule(id, ownerId);
+  return { status: 'deleted' };
+}
+
 module.exports = {
   createCapsule,
   listCapsuleSummaries,
   getCapsuleStatus,
   unlockCapsule,
+  deleteCapsule,
 };

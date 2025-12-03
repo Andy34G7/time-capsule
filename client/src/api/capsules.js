@@ -54,6 +54,16 @@ export async function unlockCapsule(capsuleId, passphrase, token) {
 	return { status, capsule: payload?.data ?? null, error: payload?.error ?? null };
 }
 
+export async function deleteCapsule(capsuleId, token) {
+	if (!capsuleId) {
+		throw new Error('CapsuleIdRequired');
+	}
+	await request(`/capsules/${capsuleId}`, {
+		method: 'DELETE',
+		token,
+	});
+}
+
 export async function uploadCompressedImage(file, token) {
 	if (!file) {
 		throw new Error('FileRequired');

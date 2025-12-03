@@ -227,11 +227,24 @@ async function uploadBinaryAsset({ ownerId, buffer, contentType, originalFileNam
 	};
 }
 
+async function deleteFileVersion(fileName, fileId) {
+	ensureConfig();
+	if (!fileName || !fileId) {
+		const err = new Error('FileNameAndIdRequired');
+		err.statusCode = 400;
+		throw err;
+	}
+	await authorize();
+	const b2 = getClient();
+	await b2.deleteFileVersion({ fileName, fileId });
+}
+
 module.exports = {
 	getImageUploadTarget,
 	getPrivateDownloadInfo,
 	uploadCompressedImage,
 	uploadBinaryAsset,
+	deleteFileVersion,
 	SUPPORTED_IMAGE_TYPES,
 	SUPPORTED_VIDEO_TYPES,
 	B2_IMAGE_PREFIX,
