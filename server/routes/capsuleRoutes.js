@@ -10,15 +10,29 @@ router.use(requireAuth());
 //dev note: schema is to set certain rules for the objects we create. 
 //usually good practice to have a schema validation to avoid bad data being processed
 // @Andy34G7: i was asked to use zod during my internship at comono, that's carried over here
-const attachmentSchema = z.object({
+const posterSchema = z.object({
 	fileName: z.string().min(1).max(255),
-	contentType: z.string().min(1).refine((value) => value.startsWith('image/'), {
-		message: 'Only image attachments are supported',
-	}),
+	contentType: z
+		.string()
+		.min(1)
+		.refine((value) => value.startsWith('image/') || value.startsWith('video/'), 'Attachments must be images or videos'),
 	size: z.number().int().min(1),
 	width: z.number().int().min(1).max(8000).optional(),
 	height: z.number().int().min(1).max(8000).optional(),
 	fileId: z.string().min(1).optional(),
+});
+
+const attachmentSchema = z.object({
+	mediaType: z.enum(['image', 'video']).optional(),
+	fileName: z.string().min(1).max(255),
+	contentType: z.string().min(1),
+	size: z.number().int().min(1),
+	width: z.number().int().min(1).max(8000).optional(),
+	height: z.number().int().min(1).max(8000).optional(),
+	fileId: z.string().min(1).optional(),
+	durationSeconds: z.number().positive().optional(),
+	bitrate: z.number().int().positive().optional(),
+	poster: posterSchema.optional(),
 });
 
 const createCapsuleSchema = z.object({

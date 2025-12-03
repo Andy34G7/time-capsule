@@ -51,12 +51,21 @@ async function ensureSchema() {
         `CREATE TABLE IF NOT EXISTS capsule_attachments (
           id TEXT PRIMARY KEY,
           capsule_id TEXT NOT NULL,
+          media_type TEXT DEFAULT 'image',
           file_name TEXT NOT NULL,
           content_type TEXT NOT NULL,
           size_bytes INTEGER NOT NULL,
           width INTEGER,
           height INTEGER,
           file_id TEXT,
+          duration_seconds REAL,
+          bitrate INTEGER,
+          poster_file_name TEXT,
+          poster_content_type TEXT,
+          poster_size_bytes INTEGER,
+          poster_width INTEGER,
+          poster_height INTEGER,
+          poster_file_id TEXT,
           created_at TEXT NOT NULL,
           FOREIGN KEY (capsule_id) REFERENCES capsules(id) ON DELETE CASCADE
         );`,
@@ -67,7 +76,18 @@ async function ensureSchema() {
         await db.execute(sql);
       }
 
-      const migrations = ['ALTER TABLE capsules ADD COLUMN owner_id TEXT'];
+      const migrations = [
+        'ALTER TABLE capsules ADD COLUMN owner_id TEXT',
+        "ALTER TABLE capsule_attachments ADD COLUMN media_type TEXT DEFAULT 'image'",
+        'ALTER TABLE capsule_attachments ADD COLUMN duration_seconds REAL',
+        'ALTER TABLE capsule_attachments ADD COLUMN bitrate INTEGER',
+        'ALTER TABLE capsule_attachments ADD COLUMN poster_file_name TEXT',
+        'ALTER TABLE capsule_attachments ADD COLUMN poster_content_type TEXT',
+        'ALTER TABLE capsule_attachments ADD COLUMN poster_size_bytes INTEGER',
+        'ALTER TABLE capsule_attachments ADD COLUMN poster_width INTEGER',
+        'ALTER TABLE capsule_attachments ADD COLUMN poster_height INTEGER',
+        'ALTER TABLE capsule_attachments ADD COLUMN poster_file_id TEXT',
+      ];
 
       for (const sql of migrations) {
         try {

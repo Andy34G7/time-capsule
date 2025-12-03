@@ -6,6 +6,7 @@ const B2_KEY = process.env.B2_APPLICATION_KEY;
 const B2_BUCKET_ID = process.env.B2_BUCKET_ID;
 const B2_BUCKET_NAME = process.env.B2_BUCKET_NAME;
 const B2_IMAGE_PREFIX = process.env.B2_IMAGE_PREFIX || 'capsules/images';
+const B2_VIDEO_PREFIX = process.env.B2_VIDEO_PREFIX || 'capsules/videos';
 const B2_DOWNLOAD_URL = process.env.B2_DOWNLOAD_URL;
 
 const SUPPORTED_IMAGE_TYPES = new Set([
@@ -14,6 +15,15 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	'image/webp',
 	'image/avif',
 	'image/gif',
+]);
+
+const SUPPORTED_VIDEO_TYPES = new Set([
+	'video/mp4',
+	'video/mpeg',
+	'video/quicktime',
+	'video/x-matroska',
+	'video/webm',
+	'video/ogg',
 ]);
 
 let client;
@@ -63,6 +73,18 @@ function inferExtension(contentType) {
 			return 'avif';
 		case 'image/gif':
 			return 'gif';
+		case 'video/mp4':
+			return 'mp4';
+		case 'video/mpeg':
+			return 'mpg';
+		case 'video/quicktime':
+			return 'mov';
+		case 'video/x-matroska':
+			return 'mkv';
+		case 'video/webm':
+			return 'webm';
+		case 'video/ogg':
+			return 'ogv';
 		default:
 			return 'bin';
 	}
@@ -80,12 +102,12 @@ function sanitizeFileName(original) {
 		.slice(0, 80);
 }
 
-function buildObjectKey({ ownerId, originalFileName, contentType }) {
+function buildObjectKey({ ownerId, originalFileName, contentType, prefix = B2_IMAGE_PREFIX, fallbackBase = 'asset' }) {
 	const extension = inferExtension(contentType);
 	const safeOriginal = sanitizeFileName(originalFileName);
-	const base = safeOriginal ? safeOriginal.replace(/\.[^.]+$/, '') : 'image';
+	const base = safeOriginal ? safeOriginal.replace(/\.[^.]+$/, '') : fallbackBase;
 	const uuidSuffix = randomUUID();
-	return `${B2_IMAGE_PREFIX}/${ownerId || 'anonymous'}/${Date.now()}-${uuidSuffix}-${base}.${extension}`;
+	return `${prefix}/${ownerId || 'anonymous'}/${Date.now()}-${uuidSuffix}-${base}.${extension}`;
 }
 
 async function getImageUploadTarget({ ownerId, contentType, originalFileName }) {
@@ -98,7 +120,7 @@ async function getImageUploadTarget({ ownerId, contentType, originalFileName }) 
 	await authorize();
 	const b2 = getClient();
 	const upload = await b2.getUploadUrl({ bucketId: B2_BUCKET_ID });
-	const fileName = buildObjectKey({ ownerId, originalFileName, contentType });
+	const fileName = buildObjectKey({ ownerId, originalFileName, contentType, prefix: B2_IMAGE_PREFIX, fallbackBase: 'image' });
 	return {
 		uploadUrl: upload.data.uploadUrl,
 		authorizationToken: upload.data.authorizationToken,
@@ -149,15 +171,27 @@ async function getPrivateDownloadInfo(fileName, validDurationSeconds = 300) {
 }
 
 async function uploadCompressedImage({ ownerId, buffer, contentType, originalFileName, metadata }) {
+	return uploadBinaryAsset({
+		ownerId,
+		buffer,
+		contentType,
+		originalFileName,
+		metadata,
+		prefix: B2_IMAGE_PREFIX,
+		fallbackBase: 'image',
+	});
+}
+
+async function uploadBinaryAsset({ ownerId, buffer, contentType, originalFileName, metadata, prefix = B2_IMAGE_PREFIX, fallbackBase = 'asset' }) {
 	ensureConfig();
 	if (!buffer || !buffer.length) {
-		const err = new Error('ImageBufferRequired');
+		const err = new Error('AssetBufferRequired');
 		err.statusCode = 400;
 		throw err;
 	}
 	await authorize();
 	const b2 = getClient();
-	const fileName = buildObjectKey({ ownerId, originalFileName, contentType });
+	const fileName = buildObjectKey({ ownerId, originalFileName, contentType, prefix, fallbackBase });
 	const uploadTarget = await b2.getUploadUrl({ bucketId: B2_BUCKET_ID });
 	const fileInfo = {};
 	if (metadata?.width) {
@@ -168,6 +202,12 @@ async function uploadCompressedImage({ ownerId, buffer, contentType, originalFil
 	}
 	if (metadata?.format) {
 		fileInfo['src-format'] = metadata.format;
+	}
+	if (metadata?.durationSeconds) {
+		fileInfo['duration-seconds'] = String(metadata.durationSeconds);
+	}
+	if (metadata?.bitrate) {
+		fileInfo['bitrate'] = String(metadata.bitrate);
 	}
 	const upload = await b2.uploadFile({
 		fileName,
@@ -183,6 +223,7 @@ async function uploadCompressedImage({ ownerId, buffer, contentType, originalFil
 		contentType,
 		contentLength: buffer.length,
 		metadata,
+		prefix,
 	};
 }
 
@@ -190,4 +231,9 @@ module.exports = {
 	getImageUploadTarget,
 	getPrivateDownloadInfo,
 	uploadCompressedImage,
+	uploadBinaryAsset,
+	SUPPORTED_IMAGE_TYPES,
+	SUPPORTED_VIDEO_TYPES,
+	B2_IMAGE_PREFIX,
+	B2_VIDEO_PREFIX,
 };

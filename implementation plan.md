@@ -211,9 +211,10 @@ This plan provides the necessary runway to implement and deploy a secure, server
 
 #### Phase 3 – Video Capsules
 
-- Reuse the pre-signed upload flow but enforce chunked uploads to B2 and stricter size caps (e.g., 100 MB) with a transcoding job (AWS MediaConvert, Mux, or B2-compatible worker) for future quality control.
-- Apply high-compression presets (e.g., H.265 1080p @ 4 Mbps + adaptive bitrate ladder) during transcoding; update Turso metadata with rendition keys and bitrates.
-- Store transcoding status/state machine fields in Turso so reveal logic only returns signed URLs once the compressed outputs exist.
+- Accept raw uploads up to 100 MB (configurable via `MEDIA_MAX_VIDEO_BYTES`) to `/api/uploads/videos/process`, enforce MIME checks, and immediately transcode server-side using FFmpeg (bundled via `fluent-ffmpeg` + `@ffmpeg-installer/ffmpeg`).
+- Convert every upload to MP4/H.264 baseline, capped at 1080p resolution and ~4 Mbps target bitrate (`MEDIA_MAX_VIDEO_BITRATE`), to balance compatibility and file size while producing a single universal rendition.
+- Extract a poster frame (WebP/JPEG, e.g., 320×180) for previews, upload both the optimized MP4 and poster to Backblaze B2, and store metadata (duration, width/height, bitrate, poster key) alongside the capsule record.
+- If future volume requires it, swap the synchronous FFmpeg step with an async worker/queue; keep schema flexible by storing a transcode status flag (`pending`, `processing`, `ready`).
 
 #### Phase 4 – Template Library & Submissions
 

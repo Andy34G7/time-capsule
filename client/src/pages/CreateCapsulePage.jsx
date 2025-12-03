@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createCapsule, uploadCompressedImage } from '../api/capsules.js';
+import { createCapsule, uploadCompressedImage, uploadVideoAttachment } from '../api/capsules.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const REVEAL_PRESETS = [
@@ -51,11 +51,26 @@ const defaultValues = {
 const MAX_ATTACHMENTS = 5;
 const MAX_IMAGE_BYTES = Number(import.meta.env.VITE_MEDIA_MAX_IMAGE_BYTES || 2 * 1024 * 1024);
 const MAX_IMAGE_MB = Math.round((MAX_IMAGE_BYTES / (1024 * 1024)) * 10) / 10;
+const MAX_VIDEO_BYTES = Number(import.meta.env.VITE_MEDIA_MAX_VIDEO_BYTES || 100 * 1024 * 1024);
+const MAX_VIDEO_MB = Math.round((MAX_VIDEO_BYTES / (1024 * 1024)) * 10) / 10;
+
+function formatSize(bytes) {
+	if (!bytes && bytes !== 0) {
+		return '0 B';
+	}
+	if (bytes < 1024) {
+		return `${bytes} B`;
+	}
+	if (bytes < 1024 * 1024) {
+		return `${Math.round(bytes / 1024)} KB`;
+	}
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function CreateCapsulePage() {
 	const [formValues, setFormValues] = useState({ ...defaultValues });
 	const [attachments, setAttachments] = useState([]);
-	const [uploadState, setUploadState] = useState({ isUploading: false, error: null });
+	const [uploadState, setUploadState] = useState({ isUploading: false, error: null, kind: null });
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { token } = useAuth();
@@ -125,20 +140,40 @@ function CreateCapsulePage() {
 			payload.passphrase = formValues.passphrase.trim();
 		}
 		if (attachments.length > 0) {
-			payload.attachments = attachments.map((attachment) => ({
-				fileName: attachment.fileName,
-				contentType: attachment.contentType,
-				size: attachment.size,
-				width: attachment.width,
-				height: attachment.height,
-				fileId: attachment.fileId,
-			}));
+			payload.attachments = attachments.map((attachment) => {
+				const base = {
+					mediaType: attachment.mediaType || 'image',
+					fileName: attachment.fileName,
+					contentType: attachment.contentType,
+					size: attachment.size,
+					width: attachment.width,
+					height: attachment.height,
+					fileId: attachment.fileId,
+				};
+				if (attachment.durationSeconds) {
+					base.durationSeconds = attachment.durationSeconds;
+				}
+				if (attachment.bitrate) {
+					base.bitrate = attachment.bitrate;
+				}
+				if (attachment.poster) {
+					base.poster = {
+						fileName: attachment.poster.fileName,
+						contentType: attachment.poster.contentType,
+						size: attachment.poster.size,
+						width: attachment.poster.width,
+						height: attachment.poster.height,
+						fileId: attachment.poster.fileId,
+					};
+				}
+				return base;
+			});
 		}
 		mutation.mutate(payload);
 	};
 
 	const handleAttachmentError = (message) => {
-		setUploadState({ isUploading: false, error: message });
+		setUploadState({ isUploading: false, error: message, kind: null });
 	};
 
 	const handleAttachmentChange = async (event) => {
@@ -148,32 +183,71 @@ function CreateCapsulePage() {
 			return;
 		}
 		if (!token) {
-			handleAttachmentError('Log in to attach images.');
+			handleAttachmentError('Log in to attach media.');
 			return;
 		}
 		if (attachments.length >= MAX_ATTACHMENTS) {
-			handleAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} images.`);
+			handleAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} items.`);
 			return;
 		}
 		if (file.size > MAX_IMAGE_BYTES) {
 			handleAttachmentError(`Each image must be ${MAX_IMAGE_MB} MB or smaller.`);
 			return;
 		}
-		setUploadState({ isUploading: true, error: null });
+		setUploadState({ isUploading: true, error: null, kind: 'image' });
 		try {
 			const uploaded = await uploadCompressedImage(file, token);
 			const previewUrl = URL.createObjectURL(file);
 			setAttachments((prev) => [
 				...prev,
 				{
+					mediaType: 'image',
 					...uploaded,
 					originalName: file.name,
 					previewUrl,
 				},
 			]);
-			setUploadState({ isUploading: false, error: null });
+			setUploadState({ isUploading: false, error: null, kind: null });
 		} catch (error) {
 			const responseMessage = error?.payload?.error || error?.message || 'Upload failed.';
+			handleAttachmentError(responseMessage);
+		}
+	};
+
+	const handleVideoChange = async (event) => {
+		const file = event.target.files?.[0];
+		event.target.value = '';
+		if (!file) {
+			return;
+		}
+		if (!token) {
+			handleAttachmentError('Log in to attach media.');
+			return;
+		}
+		if (attachments.length >= MAX_ATTACHMENTS) {
+			handleAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} items.`);
+			return;
+		}
+		if (file.size > MAX_VIDEO_BYTES) {
+			handleAttachmentError(`Each video must be ${MAX_VIDEO_MB} MB or smaller.`);
+			return;
+		}
+		setUploadState({ isUploading: true, error: null, kind: 'video' });
+		try {
+			const uploaded = await uploadVideoAttachment(file, token);
+			const previewUrl = URL.createObjectURL(file);
+			setAttachments((prev) => [
+				...prev,
+				{
+					mediaType: 'video',
+					...uploaded,
+					originalName: file.name,
+					previewUrl,
+				},
+			]);
+			setUploadState({ isUploading: false, error: null, kind: null });
+		} catch (error) {
+			const responseMessage = error?.payload?.error || error?.message || 'Video upload failed.';
 			handleAttachmentError(responseMessage);
 		}
 	};
@@ -247,7 +321,7 @@ function CreateCapsulePage() {
 					<div className="label">
 						<span className="label-text font-semibold">Images</span>
 						<span className="label-text-alt text-xs text-base-content/60">
-							Up to {MAX_ATTACHMENTS} images • {MAX_IMAGE_MB} MB each • auto-converted to WebP
+							Up to {MAX_ATTACHMENTS} items combined • {MAX_IMAGE_MB} MB per image
 						</span>
 					</div>
 					<input
@@ -257,17 +331,51 @@ function CreateCapsulePage() {
 						className="file-input file-input-bordered w-full"
 						disabled={uploadState.isUploading || !token || remainingAttachments <= 0}
 					/>
-					{uploadState.error && <p className="mt-2 text-sm text-error">{uploadState.error}</p>}
-					{attachments.length > 0 && (
+				</label>
+				<label className="form-control w-full">
+					<div className="label">
+						<span className="label-text font-semibold">Videos</span>
+						<span className="label-text-alt text-xs text-base-content/60">
+							Max size {MAX_VIDEO_MB} MB • auto-compressed to MP4 (H.264)
+						</span>
+					</div>
+					<input
+						type="file"
+						accept="video/*"
+						onChange={handleVideoChange}
+						className="file-input file-input-bordered w-full"
+						disabled={uploadState.isUploading || !token || remainingAttachments <= 0}
+					/>
+				</label>
+				{uploadState.error && <p className="mt-2 text-sm text-error">{uploadState.error}</p>}
+				{attachments.length > 0 && (
 						<ul className="mt-4 space-y-3">
-							{attachments.map((attachment) => (
-								<li
-									key={attachment.fileName}
-									className="flex items-center gap-4 rounded-2xl border border-base-200 p-3"
-								>
+							{attachments.map((attachment) => {
+								const isVideo = attachment.mediaType === 'video';
+								const durationSeconds = typeof attachment.durationSeconds === 'number'
+									? attachment.durationSeconds
+									: attachment.durationSeconds
+										? Number(attachment.durationSeconds)
+										: null;
+								return (
+									<li
+										key={attachment.fileName}
+										className="flex items-center gap-4 rounded-2xl border border-base-200 p-3"
+									>
 									<div className="avatar">
 										<div className="mask mask-squircle h-16 w-16 overflow-hidden bg-base-200">
-											{attachment.previewUrl ? (
+											{isVideo ? (
+												attachment.previewUrl ? (
+													<video
+														src={attachment.previewUrl}
+														className="h-full w-full object-cover"
+														muted
+														playsInline
+													/>
+												) : (
+													<span className="grid h-full w-full place-items-center text-xs text-base-content/50">Video</span>
+												)
+											) : attachment.previewUrl ? (
 												<img src={attachment.previewUrl} alt={attachment.originalName || 'Attachment preview'} />
 											) : (
 												<span className="grid h-full w-full place-items-center text-xs text-base-content/50">Image</span>
@@ -275,12 +383,23 @@ function CreateCapsulePage() {
 										</div>
 									</div>
 									<div className="flex-1 text-sm">
-										<p className="font-semibold text-base-content">{attachment.originalName || attachment.fileName}</p>
+										<p className="font-semibold text-base-content flex items-center gap-2">
+											{isVideo ? (
+												<span className="badge badge-primary badge-sm">Video</span>
+											) : (
+												<span className="badge badge-secondary badge-sm">Image</span>
+											)}
+											<span>{attachment.originalName || attachment.fileName}</span>
+										</p>
 										<p className="text-base-content/70">
-											{attachment.size ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : 'Size unknown'} ·{' '}
-											{attachment.width && attachment.height
+											{formatSize(attachment.size)} ·{' '}
+											{isVideo
+												? durationSeconds
+													? `${durationSeconds.toFixed(1)}s`
+													: 'duration pending'
+												: attachment.width && attachment.height
 												? `${attachment.width}×${attachment.height}px`
-												: 'Dimensions pending'}
+												: 'dimensions pending'}
 										</p>
 									</div>
 									<button
@@ -291,13 +410,13 @@ function CreateCapsulePage() {
 										Remove
 									</button>
 								</li>
-							))}
+								);
+							})}
 						</ul>
-					)}
-					{remainingAttachments > 0 && (
-						<p className="mt-2 text-xs text-base-content/60">{remainingAttachments} slot(s) left</p>
-					)}
-				</label>
+				)}
+				{remainingAttachments > 0 && (
+					<p className="mt-2 text-xs text-base-content/60">{remainingAttachments} slot(s) left</p>
+				)}
 				<label className="form-control w-full">
 					<div className="label">
 						<span className="label-text font-semibold">Reveal at *</span>
@@ -343,7 +462,9 @@ function CreateCapsulePage() {
 					{mutation.isPending
 						? 'Saving…'
 						: uploadState.isUploading
-							? 'Processing image…'
+							? uploadState.kind === 'video'
+								? 'Processing video…'
+								: 'Processing image…'
 							: !token
 								? 'Waiting for login…'
 								: 'Create capsule'}

@@ -1,12 +1,19 @@
 const { getClient, ensureSchema } = require('./dbClient');
 
+function runStatement(executor, sql, args = []) {
+	return executor.execute({ sql, args });
+}
+
 function mapAttachmentRow(row) {
 	if (!row) {
 		return null;
 	}
 	const size = Number(row.size_bytes || 0);
+	const posterSize = Number(row.poster_size_bytes || 0) || null;
+	const mediaType = row.media_type || (row.content_type?.startsWith('video/') ? 'video' : 'image');
 	return {
 		id: row.id,
+		mediaType,
 		fileName: row.file_name,
 		contentType: row.content_type,
 		size,
@@ -14,6 +21,19 @@ function mapAttachmentRow(row) {
 		width: row.width,
 		height: row.height,
 		fileId: row.file_id,
+		durationSeconds: row.duration_seconds ? Number(row.duration_seconds) : null,
+		bitrate: row.bitrate ? Number(row.bitrate) : null,
+		poster: row.poster_file_name
+			? {
+				fileName: row.poster_file_name,
+				contentType: row.poster_content_type,
+				size: posterSize,
+				sizeBytes: posterSize,
+				width: row.poster_width,
+				height: row.poster_height,
+				fileId: row.poster_file_id,
+			}
+			: null,
 		createdAt: row.created_at,
 	};
 }
@@ -41,7 +61,8 @@ async function getCapsulesByOwner(ownerId) {
 	}
 	await ensureSchema();
 	const db = getClient();
-	const { rows } = await db.execute(
+	const { rows } = await runStatement(
+		db,
 		`SELECT id, title, message, author, owner_id, created_at, reveal_at, is_locked, passphrase_hash
 		 FROM capsules WHERE owner_id = ? ORDER BY datetime(created_at) DESC`,
 		[ownerId],
@@ -59,7 +80,8 @@ async function getCapsuleById(id, ownerId) {
 	const db = getClient();
 	const params = ownerId ? [id, ownerId] : [id];
 	const whereClause = ownerId ? 'WHERE id = ? AND owner_id = ?' : 'WHERE id = ?';
-	const { rows } = await db.execute(
+	const { rows } = await runStatement(
+		db,
 		`SELECT id, title, message, author, owner_id, created_at, reveal_at, is_locked, passphrase_hash FROM capsules ${whereClause} LIMIT 1`,
 		params,
 	);
@@ -71,21 +93,50 @@ async function getCapsuleById(id, ownerId) {
 	return { ...capsule, attachments: attachmentMap.get(capsule.id) || [] };
 }
 
-async function insertAttachments(db, attachments) {
+async function insertAttachments(dbExecutor, attachments) {
 	for (const attachment of attachments) {
-		await db.execute(
-			`INSERT INTO capsule_attachments (id, capsule_id, file_name, content_type, size_bytes, width, height, file_id, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		await runStatement(
+			dbExecutor,
+			`INSERT INTO capsule_attachments (
+				id,
+				capsule_id,
+				media_type,
+				file_name,
+				content_type,
+				size_bytes,
+				width,
+				height,
+				file_id,
+				duration_seconds,
+				bitrate,
+				poster_file_name,
+				poster_content_type,
+				poster_size_bytes,
+				poster_width,
+				poster_height,
+				poster_file_id,
+				created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			,
 			[
 				attachment.id,
 				attachment.capsuleId,
+				attachment.mediaType || 'image',
 				attachment.fileName,
 				attachment.contentType,
 				attachment.sizeBytes,
 				attachment.width,
 				attachment.height,
 				attachment.fileId,
+				attachment.durationSeconds,
+				attachment.bitrate,
+				attachment.poster?.fileName || null,
+				attachment.poster?.contentType || null,
+				attachment.poster?.size || null,
+				attachment.poster?.width || null,
+				attachment.poster?.height || null,
+				attachment.poster?.fileId || null,
 				attachment.createdAt,
 			],
 		);
@@ -99,8 +150,10 @@ async function getAttachmentsForCapsules(capsuleIds) {
 	await ensureSchema();
 	const db = getClient();
 	const placeholders = capsuleIds.map(() => '?').join(',');
-	const { rows } = await db.execute(
-		`SELECT id, capsule_id, file_name, content_type, size_bytes, width, height, file_id, created_at
+	const { rows } = await runStatement(
+		db,
+		`SELECT id, capsule_id, media_type, file_name, content_type, size_bytes, width, height, file_id,
+		 duration_seconds, bitrate, poster_file_name, poster_content_type, poster_size_bytes, poster_width, poster_height, poster_file_id, created_at
 		 FROM capsule_attachments WHERE capsule_id IN (${placeholders}) ORDER BY datetime(created_at) ASC`,
 		capsuleIds,
 	);
@@ -118,9 +171,11 @@ async function getAttachmentsForCapsules(capsuleIds) {
 async function saveCapsule(capsule, attachments = []) {
 	await ensureSchema();
 	const db = getClient();
-	await db.execute('BEGIN');
+	const tx = await db.transaction('write');
+	let committed = false;
 	try {
-		await db.execute(
+		await runStatement(
+			tx,
 			`INSERT INTO capsules (id, title, message, author, owner_id, created_at, reveal_at, is_locked, passphrase_hash)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			,
@@ -137,11 +192,14 @@ async function saveCapsule(capsule, attachments = []) {
 			],
 		);
 		if (attachments.length) {
-			await insertAttachments(db, attachments);
+			await insertAttachments(tx, attachments);
 		}
-		await db.execute('COMMIT');
+		await tx.commit();
+		committed = true;
 	} catch (error) {
-		await db.execute('ROLLBACK');
+		if (!committed) {
+			await tx.rollback().catch(() => {});
+		}
 		throw error;
 	}
 	return { ...capsule, attachments };

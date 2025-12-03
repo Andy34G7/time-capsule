@@ -32,6 +32,7 @@ function normalizeAttachmentForStorage(attachment, capsuleId, timestamp) {
   return {
     id: uuidv4(),
     capsuleId,
+    mediaType: attachment.mediaType || (attachment.contentType?.startsWith('video/') ? 'video' : 'image'),
     fileName: attachment.fileName,
     contentType: attachment.contentType,
     sizeBytes: attachment.size,
@@ -39,6 +40,18 @@ function normalizeAttachmentForStorage(attachment, capsuleId, timestamp) {
     width: attachment.width ?? null,
     height: attachment.height ?? null,
     fileId: attachment.fileId || null,
+    durationSeconds: attachment.durationSeconds ?? null,
+    bitrate: attachment.bitrate ?? null,
+    poster: attachment.poster
+      ? {
+          fileName: attachment.poster.fileName,
+          contentType: attachment.poster.contentType,
+          size: attachment.poster.size,
+          width: attachment.poster.width,
+          height: attachment.poster.height,
+          fileId: attachment.poster.fileId || null,
+        }
+      : null,
     createdAt: timestamp,
   };
 }
