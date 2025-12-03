@@ -124,12 +124,15 @@ async function unlockCapsule(id, passphrase, ownerId) {
   if (!capsule) {
     return { status: 'not_found' };
   }
+  const now = new Date();
+  const revealReached = new Date(capsule.revealAt) <= now;
   if (!capsule.isLocked) {
-    const now = new Date();
-    const revealReached = new Date(capsule.revealAt) <= now;
     if (revealReached) {
       return { status: 'available', capsule: messageAvailableFlag(capsule, true) };
     }
+    return { status: 'not_revealed', capsule: messageAvailableFlag(capsule, false) };
+  }
+  if (!revealReached) {
     return { status: 'not_revealed', capsule: messageAvailableFlag(capsule, false) };
   }
   if (!capsule.passphraseHash) {

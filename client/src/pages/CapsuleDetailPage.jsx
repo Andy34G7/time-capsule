@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { formatDate, getCapsule, unlockCapsule } from '../api/capsules.js';
+import { formatDate, getAttachmentDownload, getCapsule, unlockCapsule } from '../api/capsules.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const STATUS_COPY = {
@@ -15,11 +15,38 @@ function describeStatus(status) {
 	return STATUS_COPY[status] || status || 'Unknown';
 }
 
+function formatSize(bytes) {
+	if (!Number.isFinite(bytes)) {
+		return 'Unknown size';
+	}
+	if (bytes < 1024) {
+		return `${bytes} B`;
+	}
+	if (bytes < 1024 * 1024) {
+		return `${Math.round(bytes / 1024)} KB`;
+	}
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildAuthorizedUrl(download) {
+	if (!download?.downloadUrl) {
+		return null;
+	}
+	if (!download.authorizationToken) {
+		return download.downloadUrl;
+	}
+	const separator = download.downloadUrl.includes('?') ? '&' : '?';
+	return `${download.downloadUrl}${separator}Authorization=${encodeURIComponent(download.authorizationToken)}`;
+}
+
 function CapsuleDetailPage() {
 	const { capsuleId } = useParams();
 	const queryClient = useQueryClient();
 	const [passphrase, setPassphrase] = useState('');
 	const [unlockMessage, setUnlockMessage] = useState(null);
+	const [attachmentDownloads, setAttachmentDownloads] = useState({});
+	const [attachmentError, setAttachmentError] = useState(null);
+	const [attachmentsLoading, setAttachmentsLoading] = useState(false);
 	const { token } = useAuth();
 
 	const { data, isLoading, isError, error } = useQuery({
@@ -37,6 +64,15 @@ function CapsuleDetailPage() {
 	const messageVisible = Boolean(effectiveCapsule?.message);
 	const derivedStatusKey = messageVisible ? 'available' : capsuleError ?? (capsule?.isLocked ? 'locked' : 'available');
 	const showUnlockForm = capsule?.isLocked && !messageVisible;
+	const attachments = effectiveCapsule?.attachments ?? [];
+	const attachmentKey = useMemo(
+		() =>
+			attachments
+				.map((attachment) => `${attachment.fileName || attachment.id || attachment.fileId || 'unknown'}:${attachment.poster?.fileName || ''}`)
+				.join('|'),
+		[attachments],
+	);
+	const canShowAttachments = messageVisible && attachments.length > 0;
 
 	const unlockMutation = useMutation({
 		mutationFn: async (value) => unlockCapsule(capsuleId, value, token),
@@ -48,6 +84,71 @@ function CapsuleDetailPage() {
 			}
 		},
 	});
+
+	const statusCopy = describeStatus(derivedStatusKey);
+
+	useEffect(() => {
+		if (!canShowAttachments || !token) {
+			setAttachmentDownloads({});
+			setAttachmentError(null);
+			setAttachmentsLoading(false);
+			return;
+		}
+		let cancelled = false;
+		async function fetchDownloads() {
+			setAttachmentsLoading(true);
+			setAttachmentError(null);
+			const requests = [];
+			const seen = new Set();
+			attachments.forEach((attachment) => {
+				if (attachment.fileName && !seen.has(attachment.fileName)) {
+					seen.add(attachment.fileName);
+					requests.push({ key: attachment.fileName, fileName: attachment.fileName });
+				}
+				if (attachment.poster?.fileName) {
+					const posterKey = `poster:${attachment.poster.fileName}`;
+					if (!seen.has(posterKey)) {
+						seen.add(posterKey);
+						requests.push({ key: posterKey, fileName: attachment.poster.fileName });
+					}
+				}
+			});
+			if (requests.length === 0) {
+				setAttachmentsLoading(false);
+				return;
+			}
+			const results = await Promise.allSettled(
+				requests.map(async ({ key, fileName }) => {
+					const download = await getAttachmentDownload(fileName, token);
+					return { key, download };
+				}),
+			);
+			if (cancelled) {
+				return;
+			}
+			const aggregated = {};
+			let encounteredError = false;
+			results.forEach((result, index) => {
+				if (result.status === 'fulfilled') {
+					aggregated[requests[index].key] = result.value.download;
+				} else {
+					encounteredError = true;
+				}
+			});
+			setAttachmentDownloads(aggregated);
+			setAttachmentError(encounteredError ? 'Some attachments could not be loaded.' : null);
+			setAttachmentsLoading(false);
+		}
+		fetchDownloads().catch((error) => {
+			if (!cancelled) {
+				setAttachmentError(error.message || 'Unable to load attachments.');
+				setAttachmentsLoading(false);
+			}
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [attachmentKey, attachments, canShowAttachments, token]);
 
 	if (isLoading) {
 		return <div className="alert alert-info">Loading capsule…</div>;
@@ -71,8 +172,6 @@ function CapsuleDetailPage() {
 			</div>
 		);
 	}
-
-	const statusCopy = describeStatus(derivedStatusKey);
 
 	return (
 		<section className="space-y-6 rounded-3xl border border-base-200 bg-base-100 p-6 shadow-xl">
@@ -114,6 +213,78 @@ function CapsuleDetailPage() {
 					<p className="mt-3 text-sm text-base-content/70">Message is hidden until the capsule unlocks.</p>
 				)}
 			</section>
+
+			{canShowAttachments && (
+				<section className="rounded-2xl bg-base-200/70 p-6">
+					<div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+						<h3 className="text-xl font-semibold text-base-content">Attachments</h3>
+						{attachmentsLoading && <span className="text-xs text-base-content/60">Fetching media…</span>}
+					</div>
+					{attachmentError && <p className="mt-2 text-sm text-error">{attachmentError}</p>}
+					<div className="mt-4 grid gap-4 lg:grid-cols-2">
+						{attachments.map((attachment) => {
+							const key = attachment.id || attachment.fileId || attachment.fileName;
+							const isVideo = attachment.mediaType === 'video' || attachment.contentType?.startsWith('video/');
+							const download = attachmentDownloads[attachment.fileName];
+							const posterDownload = attachment.poster?.fileName
+								? attachmentDownloads[`poster:${attachment.poster.fileName}`]
+								: null;
+							const mediaUrl = buildAuthorizedUrl(download);
+							const posterUrl = buildAuthorizedUrl(posterDownload);
+							return (
+								<article key={key} className="space-y-3 rounded-2xl border border-base-200 bg-base-100 p-4">
+									<div className="rounded-xl bg-base-200/60 p-2">
+										{isVideo ? (
+											mediaUrl ? (
+												<video
+													src={mediaUrl}
+													poster={posterUrl || undefined}
+													controls
+													preload="metadata"
+													className="aspect-video w-full rounded-lg bg-black"
+												/>
+											) : (
+												<div className="skeleton aspect-video w-full rounded-lg" />
+											)
+										) : mediaUrl ? (
+											<img
+												src={mediaUrl}
+												alt={attachment.fileName || 'Attachment'}
+												className="aspect-video w-full rounded-lg object-cover"
+											/>
+										) : (
+											<div className="skeleton aspect-video w-full rounded-lg" />
+										)}
+									</div>
+									<div className="text-sm text-base-content/80">
+										<p className="font-semibold text-base-content">{attachment.fileName || 'Attachment'}</p>
+										<p>
+											{formatSize(attachment.size)} ·{' '}
+											{isVideo
+												? attachment.durationSeconds
+													? `${Number(attachment.durationSeconds).toFixed(1)}s`
+													: 'Duration pending'
+												: attachment.width && attachment.height
+													? `${attachment.width}×${attachment.height}px`
+													: 'Dimensions pending'}
+										</p>
+										{mediaUrl && (
+											<a
+												href={mediaUrl}
+												target="_blank"
+												rel="noreferrer"
+												className="link link-primary"
+											>
+												Open in new tab
+											</a>
+										)}
+									</div>
+								</article>
+							);
+						})}
+					</div>
+				</section>
+			)}
 
 			{showUnlockForm && (
 				<section className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-6">

@@ -106,6 +106,18 @@ export async function uploadVideoAttachment(file, token) {
 	return payload?.data ?? null;
 }
 
+export async function getAttachmentDownload(fileName, token, expiresInSeconds = 600) {
+	if (!fileName) {
+		throw new Error('FileNameRequired');
+	}
+	const { payload } = await request('/uploads/images/download', {
+		method: 'POST',
+		body: JSON.stringify({ fileName, expiresInSeconds }),
+		token,
+	});
+	return payload?.data ?? null;
+}
+
 export function formatDate(timestamp) {
 	if (!timestamp) return 'N/A';
 	const date = new Date(timestamp);
